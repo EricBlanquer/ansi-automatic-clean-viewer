@@ -1,6 +1,6 @@
 # Change Log
 
-All notable changes to the "ANSI Clean Viewer" extension will be documented in this file.
+All notable changes to the "ANSI Automatic Clean Viewer" extension will be documented in this file.
 
 ## [1.0.0] - 2025-10-17
 

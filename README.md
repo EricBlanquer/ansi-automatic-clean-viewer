@@ -1,4 +1,4 @@
-# ANSI Clean Viewer
+# ANSI Automatic Clean Viewer
 
 Automatically hides ANSI escape codes and colorizes text in `.ansi` files with intelligent background processing.
 

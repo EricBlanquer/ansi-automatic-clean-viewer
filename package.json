@@ -1,6 +1,6 @@
 {
-  "name": "ansi-clean-viewer",
-  "displayName": "ANSI Clean Viewer",
+  "name": "ansi-automatic-clean-viewer",
+  "displayName": "ANSI Automatic Clean Viewer",
   "description": "Automatically hides ANSI escape codes and colorizes text in .ansi files with background processing",
   "version": "1.0.0",
   "publisher": "eric-blanquer",
@@ -20,7 +20,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/EricBlanquer/ansi-clean-viewer"
+    "url": "https://github.com/EricBlanquer/ansi-automatic-clean-viewer"
   },
   "license": "MIT",
   "activationEvents": [
