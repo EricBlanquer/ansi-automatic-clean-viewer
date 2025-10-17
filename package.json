@@ -1,0 +1,56 @@
+{
+  "name": "ansi-clean-viewer",
+  "displayName": "ANSI Clean Viewer",
+  "description": "Automatically hides ANSI escape codes and colorizes text in .ansi files with background processing",
+  "version": "1.0.0",
+  "publisher": "eric-blanquer",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Formatters",
+    "Other"
+  ],
+  "keywords": [
+    "ansi",
+    "color",
+    "terminal",
+    "escape codes",
+    "colorize"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EricBlanquer/ansi-clean-viewer"
+  },
+  "license": "MIT",
+  "activationEvents": [
+    "onLanguage:ansi"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "ansi",
+        "extensions": [".ansi"],
+        "aliases": ["ANSI", "ansi"]
+      }
+    ],
+    "commands": [
+      {
+        "command": "ansiCleanViewer.toggle",
+        "title": "Toggle ANSI Code Hiding",
+        "category": "ANSI Clean Viewer"
+      }
+    ],
+    "configuration": {
+      "title": "ANSI Clean Viewer",
+      "properties": {
+        "ansiCleanViewer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic ANSI code hiding"
+        }
+      }
+    }
+  }
+}
