@@ -2,6 +2,21 @@
 
 All notable changes to the "ANSI Automatic Clean Viewer" extension will be documented in this file.
 
+## [1.1.1] - 2025-10-18
+
+### Changed
+- Improved extension icon with rounded corners for better visual appearance
+
+## [1.1.0] - 2025-10-18
+
+### Added
+- Extension icon showing ANSI code transformation
+- Improved activation with `onStartupFinished` event for faster loading
+
+### Changed
+- Optimized extension activation to reduce delay when opening .ansi files
+- Better visual identity with custom icon
+
 ## [1.0.0] - 2025-10-17
 
 ### Added
