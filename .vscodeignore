@@ -10,3 +10,5 @@ vsc-extension-quickstart.md
 **/*.vsix
 **/*.log
 **/test-*.ansi
+.env
+**/.env
