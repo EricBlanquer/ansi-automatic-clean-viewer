@@ -1,38 +1,39 @@
 # Change Log
 
-All notable changes to the "ANSI Automatic Clean Viewer" extension will be documented in this file.
-
-## [1.1.1] - 2025-10-18
-
-### Changed
-- Improved extension icon with rounded corners for better visual appearance
-
-## [1.1.0] - 2025-10-18
+## [1.2.0] - 2025-10-25
 
 ### Added
-- Extension icon showing ANSI code transformation
-- Improved activation with `onStartupFinished` event for faster loading
+- Automatic ANSI code detection for all file types (.log, .txt, etc.)
+- Performance timing logs for ANSI detection
+- Smart caching system to avoid redundant detection checks
+- Detection on scroll for better performance
+- Detailed logging with `[ANSI CLEAN VIEWER]` prefix
 
 ### Changed
-- Optimized extension activation to reduce delay when opening .ansi files
-- Better visual identity with custom icon
+- Extension now activates only when ANSI codes are detected in files
+- Reduced initial detection from 100 to 50 lines (viewport size)
+- Detection now checks visible range instead of entire document initially
+- All logs now use consistent `[ANSI CLEAN VIEWER]` prefix
 
-## [1.0.0] - 2025-10-17
+### Fixed
+- Extension no longer interferes with non-ANSI files
+- Fixed duplicate variable declaration error
+- Improved memory usage with smarter detection caching
+
+## [1.1.1] - 2024-10-17
 
 ### Added
-- Initial release
+- Custom icon for the extension
+- Improved extension activation
+
+### Changed
+- Renamed extension to "ANSI Automatic Clean Viewer"
+
+## [1.0.0] - Initial Release
+
+### Added
 - Automatic ANSI escape code hiding
-- Color preservation with ANSI color code support
+- Text colorization based on ANSI color codes
 - Background processing for large files
-- Viewport-optimized rendering with 500-line buffer
-- Smart throttling for smooth scrolling
+- Viewport-based rendering for performance
 - Toggle command to enable/disable ANSI processing
-- Support for standard colors (30-37) and bright colors (90-97)
-- Bold text support (code 1)
-- Memory-efficient chunk processing (1000 lines per 100ms)
-
-### Features
-- Real-time colorization during scroll
-- Progressive document processing without blocking UI
-- Decoration accumulation for persistent colorization
-- Memory monitoring and optimization

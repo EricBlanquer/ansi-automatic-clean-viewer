@@ -4,6 +4,7 @@ let hideDecorationType = null;
 let colorDecorationTypes = new Map();
 let backgroundProcessing = new Map(); // Map<docUri, {currentLine, totalLines, intervalId}>
 let allDecorations = new Map(); // Map<docUri, {hiddenRanges, coloredRanges}>
+let ansiDetectionCache = new Map(); // Map<docUri, {hasAnsi: boolean, checkedRanges: Set<string>}>
 
 // ANSI color code mapping
 const ANSI_COLORS = {
@@ -15,6 +16,61 @@ const ANSI_COLORS = {
 
 const VIEWPORT_BUFFER = 500; // Lines before/after viewport for preloading
 const CHUNK_SIZE = 1000; // Lines to process per background chunk
+const ANSI_DETECTION_LINES = 50; // Number of lines to check for ANSI codes initially
+
+/**
+ * Check if document contains ANSI escape codes in a specific range
+ */
+function containsAnsiCodes(document, startLine = 0, endLine = null) {
+    const startTime = performance.now();
+    const docUri = document.uri.toString();
+
+    if (!ansiDetectionCache.has(docUri)) {
+        ansiDetectionCache.set(docUri, {
+            hasAnsi: false,
+            checkedRanges: new Set()
+        });
+    }
+
+    const cache = ansiDetectionCache.get(docUri);
+
+    // If already found ANSI codes, return immediately
+    if (cache.hasAnsi) {
+        const elapsed = (performance.now() - startTime).toFixed(2);
+        console.log(`[ANSI CLEAN VIEWER] ANSI detection (cached): ${elapsed}ms - ANSI codes present`);
+        return true;
+    }
+
+    if (endLine === null) {
+        endLine = Math.min(startLine + ANSI_DETECTION_LINES - 1, document.lineCount - 1);
+    }
+
+    const rangeKey = `${startLine}-${endLine}`;
+
+    // Skip if already checked this range
+    if (cache.checkedRanges.has(rangeKey)) {
+        const elapsed = (performance.now() - startTime).toFixed(2);
+        console.log(`[ANSI CLEAN VIEWER] ANSI detection (already checked range ${rangeKey}): ${elapsed}ms - No ANSI codes`);
+        return false;
+    }
+
+    const ansiRegex = /\x1b\[([0-9;]*)m/;
+
+    for (let i = startLine; i <= endLine; i++) {
+        const lineText = document.lineAt(i).text;
+        if (ansiRegex.test(lineText)) {
+            cache.hasAnsi = true;
+            const elapsed = (performance.now() - startTime).toFixed(2);
+            console.log(`[ANSI CLEAN VIEWER] ANSI detection (lines ${startLine}-${endLine}): ${elapsed}ms - ANSI codes FOUND at line ${i}`);
+            return true;
+        }
+    }
+
+    cache.checkedRanges.add(rangeKey);
+    const elapsed = (performance.now() - startTime).toFixed(2);
+    console.log(`[ANSI CLEAN VIEWER] ANSI detection (lines ${startLine}-${endLine}): ${elapsed}ms - No ANSI codes`);
+    return false;
+}
 
 /**
  * Get visible range with buffer
@@ -175,7 +231,7 @@ function startBackgroundProcessing(editor) {
     const visibleRange = getVisibleRange(editor);
     const visibleEnd = visibleRange.end.line;
 
-    console.log(`Starting background processing for ${totalLines} lines (starting after line ${visibleEnd})`);
+    console.log(`[ANSI CLEAN VIEWER] Starting background processing for ${totalLines} lines (starting after line ${visibleEnd})`);
 
     let currentLine = visibleEnd + 1;
 
@@ -187,7 +243,7 @@ function startBackgroundProcessing(editor) {
 
         if (currentLine >= totalLines) {
             stopBackgroundProcessing(docUri);
-            console.log(`Background processing complete for ${docUri}`);
+            console.log(`[ANSI CLEAN VIEWER] Background processing complete for ${docUri}`);
             return;
         }
 
@@ -195,7 +251,7 @@ function startBackgroundProcessing(editor) {
         const { hiddenRanges, coloredRanges } = processRange(editor, currentLine, endLine);
         addAndApplyDecorations(editor, hiddenRanges, coloredRanges);
 
-        console.log(`Background processed lines ${currentLine}-${endLine} (${Math.round((endLine / totalLines) * 100)}%)`);
+        console.log(`[ANSI CLEAN VIEWER] Background processed lines ${currentLine}-${endLine} (${Math.round((endLine / totalLines) * 100)}%)`);
 
         currentLine = endLine + 1;
     }, 100); // Process chunk every 100ms
@@ -224,6 +280,15 @@ function clearAllDecorations(docUri) {
 }
 
 /**
+ * Clear ANSI detection cache for a document
+ */
+function clearAnsiDetectionCache(docUri) {
+    if (ansiDetectionCache.has(docUri)) {
+        ansiDetectionCache.delete(docUri);
+    }
+}
+
+/**
  * Update decorations for visible area and start background processing
  */
 function updateDecorations(editor) {
@@ -231,12 +296,18 @@ function updateDecorations(editor) {
         return;
     }
 
-    if (editor.document.languageId !== 'ansi') {
+    const config = vscode.workspace.getConfiguration('ansiCleanViewer');
+    if (!config.get('enabled', true)) {
         return;
     }
 
-    const config = vscode.workspace.getConfiguration('ansiCleanViewer');
-    if (!config.get('enabled', true)) {
+    // Get visible range for detection
+    const visibleRange = getVisibleRange(editor);
+    const startLine = visibleRange.start.line;
+    const endLine = Math.min(visibleRange.end.line, editor.document.lineCount - 1);
+
+    // Check if document contains ANSI codes in visible area (works for any file type)
+    if (!containsAnsiCodes(editor.document, startLine, endLine)) {
         return;
     }
 
@@ -247,16 +318,15 @@ function updateDecorations(editor) {
         allDecorations.delete(docUri);
     }
 
-    const visibleRange = getVisibleRange(editor);
-    const { hiddenRanges, coloredRanges } = processRange(editor, visibleRange.start.line, visibleRange.end.line);
+    const { hiddenRanges, coloredRanges } = processRange(editor, startLine, endLine);
     addAndApplyDecorations(editor, hiddenRanges, coloredRanges);
 
     let totalColoredRanges = 0;
     coloredRanges.forEach(ranges => totalColoredRanges += ranges.length);
 
     const memUsage = process.memoryUsage();
-    console.log(`ANSI Clean Viewer: Initial visible decorations - ${hiddenRanges.length} hidden, ${totalColoredRanges} colored ranges`);
-    console.log(`Memory: ${(memUsage.heapUsed / 1024 / 1024).toFixed(2)} MB heap`);
+    console.log(`[ANSI CLEAN VIEWER] Initial visible decorations - ${hiddenRanges.length} hidden, ${totalColoredRanges} colored ranges`);
+    console.log(`[ANSI CLEAN VIEWER] Memory: ${(memUsage.heapUsed / 1024 / 1024).toFixed(2)} MB heap`);
 
     // Start background processing for the rest of the document
     startBackgroundProcessing(editor);
@@ -282,7 +352,8 @@ function scheduleUpdate(editor) {
 }
 
 function activate(context) {
-    console.log('ANSI CLEAN VIEWER: Extension is now ACTIVE (cached mode)!');
+    console.log('[ANSI CLEAN VIEWER] Extension is now ACTIVE (cached mode)!');
+    console.log('[ANSI CLEAN VIEWER] To see detection logs, check View > Output > Extension Host');
 
     // Update decorations when active editor changes
     vscode.window.onDidChangeActiveTextEditor(editor => {
@@ -293,18 +364,17 @@ function activate(context) {
 
     // Update decorations when viewport changes (scroll)
     vscode.window.onDidChangeTextEditorVisibleRanges(event => {
-        if (event.textEditor.document.languageId === 'ansi') {
-            scheduleUpdate(event.textEditor);
-        }
+        scheduleUpdate(event.textEditor);
     }, null, context.subscriptions);
 
     // Update when document changes
     vscode.workspace.onDidChangeTextDocument(event => {
         const editor = vscode.window.activeTextEditor;
-        if (editor && event.document === editor.document && editor.document.languageId === 'ansi') {
+        if (editor && event.document === editor.document) {
             const docUri = event.document.uri.toString();
             stopBackgroundProcessing(docUri);
             clearAllDecorations(docUri);
+            clearAnsiDetectionCache(docUri);
             scheduleUpdate(editor);
         }
     }, null, context.subscriptions);
@@ -314,6 +384,7 @@ function activate(context) {
         const docUri = document.uri.toString();
         stopBackgroundProcessing(docUri);
         clearAllDecorations(docUri);
+        clearAnsiDetectionCache(docUri);
     }, null, context.subscriptions);
 
     // Update decorations when document is opened
