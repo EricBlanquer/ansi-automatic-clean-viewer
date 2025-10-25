@@ -1,5 +1,32 @@
 # Change Log
 
+## [1.4.0] - 2025-10-25
+
+### Added
+- **Full ANSI Support**:
+  - 256-color palette (codes 38;5;n and 48;5;n)
+  - True color RGB support (codes 38;2;r;g;b and 48;2;r;g;b)
+  - Background colors (codes 40-47, 100-107)
+  - Italic text attribute (code 3)
+  - Underline text attribute (code 4)
+  - Strikethrough text attribute (code 9)
+  - Reset codes for individual attributes (22, 23, 24, 29, 39, 49)
+- **Configuration Options**:
+  - `overrideCopyCommand`: Control whether Ctrl+C strips ANSI codes (default: true)
+  - `enableMiddleClickPaste`: Enable/disable middle-click paste cleaning (default: true)
+  - `showAttributes`: Granular control over which attributes to display (bold, italic, underline, strikethrough)
+- **Preview Mode**: New command to temporarily toggle ANSI visibility without changing settings
+- **Linux Notification**: Smart notification to install xclip/xsel when missing, with helpful install instructions
+
+### Changed
+- Refactored ANSI parsing to support complex color codes and multiple attributes simultaneously
+- Improved decoration handling to support foreground + background color combinations
+- Enhanced configuration system with more granular control
+
+### Performance
+- Optimized attribute parsing for better performance with complex ANSI sequences
+- Improved memory efficiency with better decoration key management
+
 ## [1.3.0] - 2025-10-25
 
 ### Added

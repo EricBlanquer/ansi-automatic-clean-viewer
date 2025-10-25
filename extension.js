@@ -6,14 +6,42 @@ let backgroundProcessing = new Map(); // Map<docUri, {currentLine, totalLines, i
 let allDecorations = new Map(); // Map<docUri, {hiddenRanges, coloredRanges}>
 let ansiDetectionCache = new Map(); // Map<docUri, {hasAnsi: boolean, checkedRanges: Set<string>}>
 let clipboardUtility = null; // Will be set to 'xclip', 'xsel', or null
+let previewMode = false; // Temporary preview mode to show/hide ANSI codes
 
-// ANSI color code mapping
+// ANSI color code mapping (basic colors)
 const ANSI_COLORS = {
     '30': '#000000', '31': '#cd0000', '32': '#00cd00', '33': '#cdcd00',
     '34': '#5c5cff', '35': '#cd00cd', '36': '#00cdcd', '37': '#e5e5e5',
     '90': '#7f7f7f', '91': '#ff0000', '92': '#00ff00', '93': '#ffff00',
     '94': '#5c5cff', '95': '#ff00ff', '96': '#00ffff', '97': '#ffffff'
 };
+
+// 256-color palette (xterm colors)
+const ANSI_256_COLORS = (() => {
+    const colors = [];
+
+    // 0-15: Basic colors (same as above)
+    colors[0] = '#000000'; colors[1] = '#cd0000'; colors[2] = '#00cd00'; colors[3] = '#cdcd00';
+    colors[4] = '#0000ee'; colors[5] = '#cd00cd'; colors[6] = '#00cdcd'; colors[7] = '#e5e5e5';
+    colors[8] = '#7f7f7f'; colors[9] = '#ff0000'; colors[10] = '#00ff00'; colors[11] = '#ffff00';
+    colors[12] = '#5c5cff'; colors[13] = '#ff00ff'; colors[14] = '#00ffff'; colors[15] = '#ffffff';
+
+    // 16-231: 216 colors (6x6x6 cube)
+    for (let i = 0; i < 216; i++) {
+        const r = Math.floor(i / 36) * 51;
+        const g = Math.floor((i % 36) / 6) * 51;
+        const b = (i % 6) * 51;
+        colors[16 + i] = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+
+    // 232-255: Grayscale
+    for (let i = 0; i < 24; i++) {
+        const gray = 8 + i * 10;
+        colors[232 + i] = `#${gray.toString(16).padStart(2, '0')}${gray.toString(16).padStart(2, '0')}${gray.toString(16).padStart(2, '0')}`;
+    }
+
+    return colors;
+})();
 
 const VIEWPORT_BUFFER = 500; // Lines before/after viewport for preloading
 const CHUNK_SIZE = 1000; // Lines to process per background chunk
@@ -102,8 +130,15 @@ function processRange(editor, startLine, endLine) {
     const hiddenRanges = [];
     const coloredRanges = new Map();
 
-    let currentColor = null;
-    let isBold = false;
+    // Current text style state
+    let state = {
+        foreground: null,
+        background: null,
+        bold: false,
+        italic: false,
+        underline: false,
+        strikethrough: false
+    };
     let textStart = 0;
 
     const ansiRegex = /\x1b\[([0-9;]*)m/g;
@@ -113,51 +148,44 @@ function processRange(editor, startLine, endLine) {
         const codeStart = match.index;
         const codeEnd = match.index + match[0].length;
 
-        if (currentColor && textStart < codeStart) {
+        // Apply current style to text before this code
+        if (hasActiveStyle(state) && textStart < codeStart) {
             const absoluteStart = startOffset + textStart;
             const absoluteEnd = startOffset + codeStart;
             const startPos = editor.document.positionAt(absoluteStart);
             const endPos = editor.document.positionAt(absoluteEnd);
             const colorRange = new vscode.Range(startPos, endPos);
 
-            const key = `${currentColor}|${isBold}`;
+            const key = styleToKey(state);
             if (!coloredRanges.has(key)) {
                 coloredRanges.set(key, []);
             }
             coloredRanges.get(key).push(colorRange);
         }
 
+        // Hide the ANSI code
         const absoluteStart = startOffset + codeStart;
         const absoluteEnd = startOffset + codeEnd;
         const hideStartPos = editor.document.positionAt(absoluteStart);
         const hideEndPos = editor.document.positionAt(absoluteEnd);
         hiddenRanges.push(new vscode.Range(hideStartPos, hideEndPos));
 
+        // Parse and apply the ANSI codes
         const codes = match[1].split(';').filter(c => c);
-        if (codes.length === 0 || codes[0] === '0') {
-            currentColor = null;
-            isBold = false;
-        } else {
-            for (const code of codes) {
-                if (code === '1') {
-                    isBold = true;
-                } else if (ANSI_COLORS[code]) {
-                    currentColor = ANSI_COLORS[code];
-                }
-            }
-        }
+        parseAnsiCodes(codes, state);
 
         textStart = codeEnd;
     }
 
-    if (currentColor && textStart < text.length) {
+    // Apply style to remaining text
+    if (hasActiveStyle(state) && textStart < text.length) {
         const absoluteStart = startOffset + textStart;
         const absoluteEnd = startOffset + text.length;
         const startPos = editor.document.positionAt(absoluteStart);
         const endPos = editor.document.positionAt(absoluteEnd);
         const colorRange = new vscode.Range(startPos, endPos);
 
-        const key = `${currentColor}|${isBold}`;
+        const key = styleToKey(state);
         if (!coloredRanges.has(key)) {
             coloredRanges.set(key, []);
         }
@@ -165,6 +193,112 @@ function processRange(editor, startLine, endLine) {
     }
 
     return { hiddenRanges, coloredRanges };
+}
+
+/**
+ * Check if style state has any active styling
+ */
+function hasActiveStyle(state) {
+    return state.foreground || state.background || state.bold || state.italic || state.underline || state.strikethrough;
+}
+
+/**
+ * Convert style state to a unique key for decoration caching
+ */
+function styleToKey(state) {
+    return `${state.foreground || ''}|${state.background || ''}|${state.bold}|${state.italic}|${state.underline}|${state.strikethrough}`;
+}
+
+/**
+ * Parse ANSI codes and update style state
+ */
+function parseAnsiCodes(codes, state) {
+    if (codes.length === 0 || codes[0] === '0') {
+        // Reset all
+        state.foreground = null;
+        state.background = null;
+        state.bold = false;
+        state.italic = false;
+        state.underline = false;
+        state.strikethrough = false;
+        return;
+    }
+
+    let i = 0;
+    while (i < codes.length) {
+        const code = codes[i];
+
+        if (code === '1') {
+            state.bold = true;
+        } else if (code === '3') {
+            state.italic = true;
+        } else if (code === '4') {
+            state.underline = true;
+        } else if (code === '9') {
+            state.strikethrough = true;
+        } else if (code === '22') {
+            state.bold = false;
+        } else if (code === '23') {
+            state.italic = false;
+        } else if (code === '24') {
+            state.underline = false;
+        } else if (code === '29') {
+            state.strikethrough = false;
+        } else if (code === '38' && i + 1 < codes.length) {
+            // Foreground color
+            if (codes[i + 1] === '5' && i + 2 < codes.length) {
+                // 256 color: 38;5;n
+                const colorIndex = parseInt(codes[i + 2], 10);
+                if (colorIndex >= 0 && colorIndex < 256) {
+                    state.foreground = ANSI_256_COLORS[colorIndex];
+                }
+                i += 2;
+            } else if (codes[i + 1] === '2' && i + 4 < codes.length) {
+                // RGB color: 38;2;r;g;b
+                const r = parseInt(codes[i + 2], 10);
+                const g = parseInt(codes[i + 3], 10);
+                const b = parseInt(codes[i + 4], 10);
+                state.foreground = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+                i += 4;
+            }
+        } else if (code === '48' && i + 1 < codes.length) {
+            // Background color
+            if (codes[i + 1] === '5' && i + 2 < codes.length) {
+                // 256 color: 48;5;n
+                const colorIndex = parseInt(codes[i + 2], 10);
+                if (colorIndex >= 0 && colorIndex < 256) {
+                    state.background = ANSI_256_COLORS[colorIndex];
+                }
+                i += 2;
+            } else if (codes[i + 1] === '2' && i + 4 < codes.length) {
+                // RGB color: 48;2;r;g;b
+                const r = parseInt(codes[i + 2], 10);
+                const g = parseInt(codes[i + 3], 10);
+                const b = parseInt(codes[i + 4], 10);
+                state.background = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+                i += 4;
+            }
+        } else if (code === '39') {
+            // Reset foreground
+            state.foreground = null;
+        } else if (code === '49') {
+            // Reset background
+            state.background = null;
+        } else if (ANSI_COLORS[code]) {
+            // Basic foreground colors (30-37, 90-97)
+            state.foreground = ANSI_COLORS[code];
+        } else if (code >= '40' && code <= '47') {
+            // Basic background colors
+            const bgIndex = parseInt(code, 10) - 10;
+            state.background = ANSI_COLORS[bgIndex.toString()];
+        } else if (code >= '100' && code <= '107') {
+            // Bright background colors
+            const bgIndex = parseInt(code, 10) - 10;
+            state.background = ANSI_COLORS[bgIndex.toString()];
+        }
+
+        i++;
+    }
 }
 
 /**
@@ -205,13 +339,39 @@ function addAndApplyDecorations(editor, hiddenRanges, coloredRanges) {
     editor.setDecorations(hideDecorationType, cache.hiddenRanges);
 
     cache.coloredRanges.forEach((ranges, key) => {
-        const [color, bold] = key.split('|');
+        const [foreground, background, bold, italic, underline, strikethrough] = key.split('|');
 
         if (!colorDecorationTypes.has(key)) {
-            const decorationType = vscode.window.createTextEditorDecorationType({
-                color: color,
-                fontWeight: bold === 'true' ? 'bold' : 'normal'
+            const config = vscode.workspace.getConfiguration('ansiCleanViewer');
+            const showAttributes = config.get('showAttributes', {
+                bold: true,
+                italic: true,
+                underline: true,
+                strikethrough: true
             });
+
+            const decorationOptions = {};
+
+            if (foreground) {
+                decorationOptions.color = foreground;
+            }
+            if (background) {
+                decorationOptions.backgroundColor = background;
+            }
+            if (bold === 'true' && showAttributes.bold) {
+                decorationOptions.fontWeight = 'bold';
+            }
+            if (italic === 'true' && showAttributes.italic) {
+                decorationOptions.fontStyle = 'italic';
+            }
+            if (underline === 'true' && showAttributes.underline) {
+                decorationOptions.textDecoration = 'underline';
+            }
+            if (strikethrough === 'true' && showAttributes.strikethrough) {
+                decorationOptions.textDecoration = (decorationOptions.textDecoration || '') + ' line-through';
+            }
+
+            const decorationType = vscode.window.createTextEditorDecorationType(decorationOptions);
             colorDecorationTypes.set(key, decorationType);
         }
 
@@ -355,7 +515,7 @@ function scheduleUpdate(editor) {
 /**
  * Detect which clipboard utility is available (Linux only)
  */
-function detectClipboardUtility() {
+async function detectClipboardUtility() {
     return new Promise((resolve) => {
         if (process.platform !== 'linux') {
             resolve(null);
@@ -377,6 +537,21 @@ function detectClipboardUtility() {
                         resolve('xsel');
                     } else {
                         console.log('[ANSI CLEAN VIEWER] No clipboard utility found (xclip/xsel). Middle-click paste will include ANSI codes.');
+
+                        // Show notification with install instructions
+                        vscode.window.showInformationMessage(
+                            'ANSI Clean Viewer: Install xclip or xsel for clean middle-click paste',
+                            'Install xclip',
+                            'Install xsel',
+                            'Dismiss'
+                        ).then(selection => {
+                            if (selection === 'Install xclip') {
+                                vscode.window.showInformationMessage('Run in terminal: sudo apt install xclip');
+                            } else if (selection === 'Install xsel') {
+                                vscode.window.showInformationMessage('Run in terminal: sudo apt install xsel');
+                            }
+                        });
+
                         resolve(null);
                     }
                 });
@@ -457,6 +632,15 @@ async function activate(context) {
 
     // Command to copy text without ANSI codes
     const copyCommand = vscode.commands.registerCommand('ansiCleanViewer.copy', async () => {
+        const config = vscode.workspace.getConfiguration('ansiCleanViewer');
+        const overrideCopy = config.get('overrideCopyCommand', true);
+
+        // If override is disabled, use default copy behavior
+        if (!overrideCopy) {
+            await vscode.commands.executeCommand('editor.action.clipboardCopyAction');
+            return;
+        }
+
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             return;
@@ -485,8 +669,11 @@ async function activate(context) {
 
     // Auto-copy selection without ANSI codes to primary clipboard (Linux middle-click)
     vscode.window.onDidChangeTextEditorSelection(async (event) => {
-        // Only process if a clipboard utility is available
-        if (!clipboardUtility) {
+        const config = vscode.workspace.getConfiguration('ansiCleanViewer');
+        const enableMiddleClick = config.get('enableMiddleClickPaste', true);
+
+        // Only process if feature is enabled and clipboard utility is available
+        if (!enableMiddleClick || !clipboardUtility) {
             return;
         }
 
@@ -527,6 +714,33 @@ async function activate(context) {
             console.error('[ANSI CLEAN VIEWER] Error accessing clipboard utility:', error);
         }
     }, null, context.subscriptions);
+
+    // Command to toggle ANSI visibility (preview mode - temporary, doesn't change settings)
+    const previewCommand = vscode.commands.registerCommand('ansiCleanViewer.preview', () => {
+        previewMode = !previewMode;
+
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            return;
+        }
+
+        if (previewMode) {
+            // Show ANSI codes - remove all decorations
+            if (hideDecorationType) {
+                editor.setDecorations(hideDecorationType, []);
+            }
+            colorDecorationTypes.forEach(decorationType => {
+                editor.setDecorations(decorationType, []);
+            });
+            vscode.window.showInformationMessage('ANSI codes are now visible (preview mode)');
+        } else {
+            // Hide ANSI codes - restore decorations
+            updateDecorations(editor);
+            vscode.window.showInformationMessage('ANSI codes are now hidden');
+        }
+    });
+
+    context.subscriptions.push(previewCommand);
 
     // Update current editor if it's already open
     if (vscode.window.activeTextEditor) {
