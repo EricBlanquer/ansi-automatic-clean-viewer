@@ -1,8 +1,8 @@
 {
   "name": "ansi-automatic-clean-viewer",
   "displayName": "ANSI Automatic Clean Viewer",
-  "description": "Automatically hides ANSI escape codes and colorizes text in files containing ANSI codes with background processing",
-  "version": "1.2.0",
+  "description": "Automatically detects and hides ANSI escape codes in any text file, with clean copy functionality",
+  "version": "1.3.0",
   "publisher": "eric-blanquer",
   "engines": {
     "vscode": "^1.60.0"
@@ -41,6 +41,19 @@
         "command": "ansiCleanViewer.toggle",
         "title": "Toggle ANSI Code Hiding",
         "category": "ANSI Clean Viewer"
+      },
+      {
+        "command": "ansiCleanViewer.copy",
+        "title": "Copy Without ANSI Codes",
+        "category": "ANSI Clean Viewer"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ansiCleanViewer.copy",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "editorTextFocus"
       }
     ],
     "configuration": {

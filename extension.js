@@ -5,6 +5,7 @@ let colorDecorationTypes = new Map();
 let backgroundProcessing = new Map(); // Map<docUri, {currentLine, totalLines, intervalId}>
 let allDecorations = new Map(); // Map<docUri, {hiddenRanges, coloredRanges}>
 let ansiDetectionCache = new Map(); // Map<docUri, {hasAnsi: boolean, checkedRanges: Set<string>}>
+let clipboardUtility = null; // Will be set to 'xclip', 'xsel', or null
 
 // ANSI color code mapping
 const ANSI_COLORS = {
@@ -351,9 +352,45 @@ function scheduleUpdate(editor) {
     });
 }
 
-function activate(context) {
+/**
+ * Detect which clipboard utility is available (Linux only)
+ */
+function detectClipboardUtility() {
+    return new Promise((resolve) => {
+        if (process.platform !== 'linux') {
+            resolve(null);
+            return;
+        }
+
+        const { exec } = require('child_process');
+
+        // Try xclip first
+        exec('which xclip', (error) => {
+            if (!error) {
+                console.log('[ANSI CLEAN VIEWER] Using xclip for primary selection');
+                resolve('xclip');
+            } else {
+                // Try xsel as fallback
+                exec('which xsel', (error2) => {
+                    if (!error2) {
+                        console.log('[ANSI CLEAN VIEWER] Using xsel for primary selection');
+                        resolve('xsel');
+                    } else {
+                        console.log('[ANSI CLEAN VIEWER] No clipboard utility found (xclip/xsel). Middle-click paste will include ANSI codes.');
+                        resolve(null);
+                    }
+                });
+            }
+        });
+    });
+}
+
+async function activate(context) {
     console.log('[ANSI CLEAN VIEWER] Extension is now ACTIVE (cached mode)!');
     console.log('[ANSI CLEAN VIEWER] To see detection logs, check View > Output > Extension Host');
+
+    // Detect which clipboard utility is available on Linux
+    clipboardUtility = await detectClipboardUtility();
 
     // Update decorations when active editor changes
     vscode.window.onDidChangeActiveTextEditor(editor => {
@@ -417,6 +454,79 @@ function activate(context) {
     });
 
     context.subscriptions.push(toggleCommand);
+
+    // Command to copy text without ANSI codes
+    const copyCommand = vscode.commands.registerCommand('ansiCleanViewer.copy', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            return;
+        }
+
+        const selection = editor.selection;
+        let textToCopy = '';
+
+        if (selection.isEmpty) {
+            // If no selection, copy the entire line (default VS Code behavior)
+            const line = editor.document.lineAt(selection.start.line);
+            textToCopy = line.text + '\n';
+        } else {
+            // Copy selected text
+            textToCopy = editor.document.getText(selection);
+        }
+
+        // Strip ANSI escape codes
+        const cleanText = textToCopy.replace(/\x1b\[([0-9;]*)m/g, '');
+
+        // Copy to clipboard
+        await vscode.env.clipboard.writeText(cleanText);
+    });
+
+    context.subscriptions.push(copyCommand);
+
+    // Auto-copy selection without ANSI codes to primary clipboard (Linux middle-click)
+    vscode.window.onDidChangeTextEditorSelection(async (event) => {
+        // Only process if a clipboard utility is available
+        if (!clipboardUtility) {
+            return;
+        }
+
+        const editor = event.textEditor;
+        const selection = event.selections[0];
+
+        // Only process if there's actual text selected
+        if (!selection || selection.isEmpty) {
+            return;
+        }
+
+        // Get selected text
+        const selectedText = editor.document.getText(selection);
+
+        // Check if text contains ANSI codes
+        if (!/\x1b\[([0-9;]*)m/.test(selectedText)) {
+            return; // No ANSI codes, no need to clean
+        }
+
+        // Strip ANSI codes
+        const cleanText = selectedText.replace(/\x1b\[([0-9;]*)m/g, '');
+
+        // Copy to primary selection using detected utility
+        try {
+            const { exec } = require('child_process');
+            const command = clipboardUtility === 'xclip'
+                ? 'xclip -selection primary'
+                : 'xsel --primary --input';
+
+            const proc = exec(command, (err) => {
+                if (err) {
+                    console.error(`[ANSI CLEAN VIEWER] Failed to copy to primary selection with ${clipboardUtility}:`, err);
+                }
+            });
+            proc.stdin.write(cleanText);
+            proc.stdin.end();
+        } catch (error) {
+            console.error('[ANSI CLEAN VIEWER] Error accessing clipboard utility:', error);
+        }
+    }, null, context.subscriptions);
 
     // Update current editor if it's already open
     if (vscode.window.activeTextEditor) {

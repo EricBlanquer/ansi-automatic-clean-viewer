@@ -1,5 +1,18 @@
 # Change Log
 
+## [1.3.0] - 2025-10-25
+
+### Added
+- Copy without ANSI codes feature - Ctrl+C (Cmd+C) now automatically strips ANSI escape codes when copying text
+- New command "Copy Without ANSI Codes" available via command palette
+- Keybinding for copy command that replaces default copy behavior
+- Middle-click paste support (Linux) - Automatically strips ANSI codes when using mouse selection and middle-click paste
+- Auto-detection of clipboard utilities (xclip/xsel) at startup for optimal performance
+
+### Changed
+- Updated documentation to reflect support for all file types, not just .ansi files
+- Optimized clipboard utility detection to run once at startup instead of on every selection
+
 ## [1.2.0] - 2025-10-25
 
 ### Added
